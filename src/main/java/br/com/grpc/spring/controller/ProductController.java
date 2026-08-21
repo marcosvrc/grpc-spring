@@ -1,14 +1,20 @@
 package br.com.grpc.spring.controller;
 
-import br.com.grpc.spring.*;
+
+import br.com.grpc.spring.EmptyRequest;
+import br.com.grpc.spring.EmptyResponse;
+import br.com.grpc.spring.ProductRequest;
+import br.com.grpc.spring.ProductResponse;
+import br.com.grpc.spring.ProductResponseList;
+import br.com.grpc.spring.ProductServiceGrpc;
+import br.com.grpc.spring.RequestById;
 import br.com.grpc.spring.dto.ProductInputDTO;
 import br.com.grpc.spring.dto.ProductOutputDTO;
 import br.com.grpc.spring.service.IProductService;
 import br.com.grpc.spring.util.ProductConverterUtil;
 import io.grpc.stub.StreamObserver;
-import net.devh.boot.grpc.server.service.GrpcService;
+import org.springframework.grpc.server.service.GrpcService;
 import org.springframework.beans.factory.annotation.Autowired;
-
 import java.util.List;
 import java.util.stream.Collectors;
 

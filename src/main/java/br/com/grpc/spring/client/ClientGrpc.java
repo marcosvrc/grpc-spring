@@ -1,6 +1,12 @@
 package br.com.grpc.spring.client;
 
-import br.com.grpc.spring.*;
+import br.com.grpc.spring.EmptyRequest;
+import br.com.grpc.spring.EmptyResponse;
+import br.com.grpc.spring.ProductRequest;
+import br.com.grpc.spring.ProductResponse;
+import br.com.grpc.spring.ProductResponseList;
+import br.com.grpc.spring.ProductServiceGrpc;
+import br.com.grpc.spring.RequestById;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 
