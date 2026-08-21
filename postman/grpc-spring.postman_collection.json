@@ -1,0 +1,98 @@
+{
+	"info": {
+		"_postman_id": "b6f2f1f0-2f6f-4a1a-9d0b-1a2b3c4d5e6f",
+		"name": "grpc-spring - ProductService",
+		"description": "Coleção gRPC para o serviço br.com.grpc.spring.ProductService (projeto grpc-spring).\n\nServidor gRPC padrão: localhost:9090 (ver spring.grpc.server.port em application.properties).\n\nIMPORTANTE: o Postman precisa da definição do .proto para montar as chamadas gRPC. Em cada request desta coleção, abra a aba \"Service definition\" e importe o arquivo:\n  src/main/proto/product-service.proto\n(está no repositório do projeto). Depois disso o corpo da mensagem já vem no formato certo e você pode inclusive gerar exemplos automaticamente a partir do schema.",
+		"schema": "https://schema.postman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Create",
+			"request": {
+				"method": "GRPC",
+				"grpc": {
+					"url": "localhost:9090",
+					"method": {
+						"name": "Create",
+						"type": "unary",
+						"path": "/br.com.grpc.spring.ProductService/Create",
+						"requestStream": false,
+						"responseStream": false,
+						"requestType": "ProductRequest",
+						"responseType": "ProductResponse"
+					},
+					"message": "{\n    \"name\": \"COMPUTADOR\",\n    \"price\": 2540.99,\n    \"quantityInStock\": 400\n}",
+					"metadata": []
+				},
+				"description": "rpc Create(ProductRequest) returns (ProductResponse)"
+			},
+			"response": []
+		},
+		{
+			"name": "FindById",
+			"request": {
+				"method": "GRPC",
+				"grpc": {
+					"url": "localhost:9090",
+					"method": {
+						"name": "FindById",
+						"type": "unary",
+						"path": "/br.com.grpc.spring.ProductService/FindById",
+						"requestStream": false,
+						"responseStream": false,
+						"requestType": "RequestById",
+						"responseType": "ProductResponse"
+					},
+					"message": "{\n    \"id\": \"1\"\n}",
+					"metadata": []
+				},
+				"description": "rpc FindById(RequestById) returns (ProductResponse)"
+			},
+			"response": []
+		},
+		{
+			"name": "FindAll",
+			"request": {
+				"method": "GRPC",
+				"grpc": {
+					"url": "localhost:9090",
+					"method": {
+						"name": "FindAll",
+						"type": "unary",
+						"path": "/br.com.grpc.spring.ProductService/FindAll",
+						"requestStream": false,
+						"responseStream": false,
+						"requestType": "EmptyRequest",
+						"responseType": "ProductResponseList"
+					},
+					"message": "{}",
+					"metadata": []
+				},
+				"description": "rpc FindAll(EmptyRequest) returns (ProductResponseList)"
+			},
+			"response": []
+		},
+		{
+			"name": "Delete",
+			"request": {
+				"method": "GRPC",
+				"grpc": {
+					"url": "localhost:9090",
+					"method": {
+						"name": "Delete",
+						"type": "unary",
+						"path": "/br.com.grpc.spring.ProductService/Delete",
+						"requestStream": false,
+						"responseStream": false,
+						"requestType": "RequestById",
+						"responseType": "EmptyResponse"
+					},
+					"message": "{\n    \"id\": \"1\"\n}",
+					"metadata": []
+				},
+				"description": "rpc Delete(RequestById) returns (EmptyResponse)"
+			},
+			"response": []
+		}
+	]
+}
