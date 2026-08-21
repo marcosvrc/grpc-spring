@@ -1,6 +1,5 @@
 package br.com.grpc.spring.client;
 
-import br.com.grpc.spring.*;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 
