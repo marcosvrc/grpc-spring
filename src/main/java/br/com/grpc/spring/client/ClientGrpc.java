@@ -1,7 +1,7 @@
 package br.com.grpc.spring.client;
 
-import br.com.grpc.spring.EmptyRequest;
 import br.com.grpc.spring.EmptyResponse;
+import br.com.grpc.spring.FindAllRequest;
 import br.com.grpc.spring.ProductRequest;
 import br.com.grpc.spring.ProductResponse;
 import br.com.grpc.spring.ProductResponseList;
@@ -9,9 +9,17 @@ import br.com.grpc.spring.ProductServiceGrpc;
 import br.com.grpc.spring.RequestById;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.stub.MetadataUtils;
 
 
 public class ClientGrpc {
+
+    // Precisa bater com "app.security.api-key" (variável de ambiente API_KEY) do servidor.
+    private static final Metadata.Key<String> API_KEY_HEADER =
+            Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
+    private static final String API_KEY =
+            System.getenv().getOrDefault("API_KEY", "local-dev-key-change-me");
 
     public static void main(String[] args) {
 
@@ -31,7 +39,9 @@ public class ClientGrpc {
         System.out.println("Query Product A: \n" + responseFindProductA);
 
         ProductResponseList responseFindAll = findAll(stub);
-        System.out.println("Query All Products \n");
+        System.out.println("Query All Products (page " + responseFindAll.getPage()
+                + ", " + responseFindAll.getTotalElements() + " no total, "
+                + responseFindAll.getTotalPages() + " pagina(s)) \n");
         responseFindAll.getProductList().forEach(System.out::println);
 
         System.out.println("Delete ProductA \n");
@@ -53,7 +63,10 @@ public class ClientGrpc {
     }
 
     private static ProductServiceGrpc.ProductServiceBlockingStub createStub(ManagedChannel channel){
-        return ProductServiceGrpc.newBlockingStub(channel);
+        Metadata headers = new Metadata();
+        headers.put(API_KEY_HEADER, API_KEY);
+        return ProductServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
     }
 
     private static ProductResponse findById(ProductServiceGrpc.ProductServiceBlockingStub stub, long id){
@@ -61,7 +74,7 @@ public class ClientGrpc {
     }
 
     private static ProductResponseList findAll(ProductServiceGrpc.ProductServiceBlockingStub stub){
-        return stub.findAll(EmptyRequest.newBuilder().build());
+        return stub.findAll(FindAllRequest.newBuilder().setPage(0).setSize(20).build());
     }
 
     private static ProductResponse createProduct(ProductServiceGrpc.ProductServiceBlockingStub stub,

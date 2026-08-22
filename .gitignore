@@ -1,5 +1,11 @@
 ELP.md
 target/
+
+### Variáveis de ambiente ###
+.env
+
+### Certificado TLS de desenvolvimento (gerado por scripts/generate-dev-cert.sh) ###
+certs/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
