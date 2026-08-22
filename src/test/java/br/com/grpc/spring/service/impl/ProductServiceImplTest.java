@@ -16,6 +16,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import java.util.Arrays;
 import java.util.List;
@@ -102,15 +105,16 @@ public class ProductServiceImplTest {
     public void findAllProductSuccessTest(){
 
         List<ProductEntity> listProductEntity = createListProductEntity();
+        Page<ProductEntity> pageProductEntity = new PageImpl<>(listProductEntity);
 
-        Mockito.when(productRepository.findAll()).thenReturn(listProductEntity);
+        Mockito.when(productRepository.findAll(Mockito.any(Pageable.class))).thenReturn(pageProductEntity);
 
-        List<ProductOutputDTO> listProductOutputDTO = productService.findAll();
+        Page<ProductOutputDTO> pageProductOutputDTO = productService.findAll(0, 20);
 
         //Outra opção de validação
-        //Assertions.assertThat(listProductOutputDTO.size()).isGreaterThan(1);
+        //Assertions.assertThat(pageProductOutputDTO.getContent().size()).isGreaterThan(1);
 
-        Assertions.assertThat(listProductOutputDTO)
+        Assertions.assertThat(pageProductOutputDTO.getContent())
                 .extracting(ID_FIELD, NAME_FIELD, PRICE_FIELD, QUANTITY_IN_STOCK_FIELD)
                 .contains(
                         Tuple.tuple(1L, "Computador", 1234.98, 100),

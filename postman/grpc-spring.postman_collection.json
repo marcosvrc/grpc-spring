@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "b6f2f1f0-2f6f-4a1a-9d0b-1a2b3c4d5e6f",
 		"name": "grpc-spring - ProductService",
-		"description": "Coleção gRPC para o serviço br.com.grpc.spring.ProductService (projeto grpc-spring).\n\nServidor gRPC padrão: localhost:9090 (ver spring.grpc.server.port em application.properties).\n\nIMPORTANTE: o Postman precisa da definição do .proto para montar as chamadas gRPC. Em cada request desta coleção, abra a aba \"Service definition\" e importe o arquivo:\n  src/main/proto/product-service.proto\n(está no repositório do projeto). Depois disso o corpo da mensagem já vem no formato certo e você pode inclusive gerar exemplos automaticamente a partir do schema.",
+		"description": "Coleção gRPC para o serviço br.com.grpc.spring.ProductService (projeto grpc-spring).\n\nServidor gRPC padrão: localhost:9090 (ver spring.grpc.server.port em application.properties).\n\nIMPORTANTE: o Postman precisa da definição do .proto para montar as chamadas gRPC. Em cada request desta coleção, abra a aba \"Service definition\" e importe o arquivo:\n  src/main/proto/product-service.proto\n(está no repositório do projeto). Depois disso o corpo da mensagem já vem no formato certo e você pode inclusive gerar exemplos automaticamente a partir do schema.\n\nAUTENTICAÇÃO: toda chamada exige o header (metadata) \"x-api-key\", já preenchido em cada request com o default local \"local-dev-key-change-me\" (ver app.security.api-key / variável de ambiente API_KEY). Se você customizou a chave no servidor, atualize também aqui.",
 		"schema": "https://schema.postman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -22,7 +22,12 @@
 						"responseType": "ProductResponse"
 					},
 					"message": "{\n    \"name\": \"COMPUTADOR\",\n    \"price\": 2540.99,\n    \"quantityInStock\": 400\n}",
-					"metadata": []
+					"metadata": [
+						{
+							"key": "x-api-key",
+							"value": "local-dev-key-change-me"
+						}
+					]
 				},
 				"description": "rpc Create(ProductRequest) returns (ProductResponse)"
 			},
@@ -44,7 +49,12 @@
 						"responseType": "ProductResponse"
 					},
 					"message": "{\n    \"id\": \"1\"\n}",
-					"metadata": []
+					"metadata": [
+						{
+							"key": "x-api-key",
+							"value": "local-dev-key-change-me"
+						}
+					]
 				},
 				"description": "rpc FindById(RequestById) returns (ProductResponse)"
 			},
@@ -62,13 +72,18 @@
 						"path": "/br.com.grpc.spring.ProductService/FindAll",
 						"requestStream": false,
 						"responseStream": false,
-						"requestType": "EmptyRequest",
+						"requestType": "FindAllRequest",
 						"responseType": "ProductResponseList"
 					},
-					"message": "{}",
-					"metadata": []
+					"message": "{\n    \"page\": 0,\n    \"size\": 10\n}",
+					"metadata": [
+						{
+							"key": "x-api-key",
+							"value": "local-dev-key-change-me"
+						}
+					]
 				},
-				"description": "rpc FindAll(EmptyRequest) returns (ProductResponseList)"
+				"description": "rpc FindAll(FindAllRequest) returns (ProductResponseList). page/size opcionais - size <= 0 usa o default (20), acima de 100 é limitado a 100."
 			},
 			"response": []
 		},
@@ -88,7 +103,12 @@
 						"responseType": "EmptyResponse"
 					},
 					"message": "{\n    \"id\": \"1\"\n}",
-					"metadata": []
+					"metadata": [
+						{
+							"key": "x-api-key",
+							"value": "local-dev-key-change-me"
+						}
+					]
 				},
 				"description": "rpc Delete(RequestById) returns (EmptyResponse)"
 			},

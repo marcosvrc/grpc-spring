@@ -9,16 +9,23 @@ service ProductService {
   rpc Create(ProductRequest) returns (ProductResponse);
   rpc FindById(RequestById) returns (ProductResponse);
   rpc Delete(RequestById) returns (EmptyResponse);
-  rpc FindAll(EmptyRequest) returns (ProductResponseList);
+  rpc FindAll(FindAllRequest) returns (ProductResponseList);
 
 }
 
-message EmptyRequest {}
-
 message EmptyResponse {}
+
+message FindAllRequest {
+  int32 page = 1;
+  int32 size = 2;
+}
 
 message ProductResponseList {
   repeated ProductResponse product = 1;
+  int32 page = 2;
+  int32 size = 3;
+  int64 total_elements = 4;
+  int32 total_pages = 5;
 }
 
 message RequestById {

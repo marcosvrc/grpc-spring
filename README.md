@@ -23,12 +23,14 @@ Projeto desenvolvido originalmente a partir do curso **"Spring Boot e gRPC - Cri
 - [Pré-requisitos](#pré-requisitos)
 - [Como executar](#como-executar)
 - [Serviço gRPC](#serviço-grpc)
+- [Autenticação e TLS](#autenticação-e-tls)
 - [Testando o serviço manualmente](#testando-o-serviço-manualmente)
 - [Testes](#testes)
 - [Configuração](#configuração)
 - [Histórico de atualizações](#histórico-de-atualizações)
 - [Próximos passos recomendados](#próximos-passos-recomendados)
 - [Observações conhecidas](#observações-conhecidas)
+- [Segurança](#segurança)
 - [Licença](#licença)
 
 ## Sobre o projeto
@@ -61,6 +63,7 @@ src/main/java/br/com/grpc/spring/
 ├── Application.java                        Bootstrap do Spring Boot
 ├── client/ClientGrpc.java                  Cliente de exemplo (main), útil para testes manuais
 ├── controller/ProductController.java       Implementação do serviço gRPC (@GrpcService)
+├── security/ApiKeyServerInterceptor.java   Interceptor global de autenticação (header x-api-key)
 ├── service/                                Interface + implementação da regra de negócio
 ├── repository/ProductRepository.java       Spring Data JPA
 ├── entity/ProductEntity.java               Entidade JPA (jakarta.persistence)
@@ -69,8 +72,10 @@ src/main/java/br/com/grpc/spring/
 ├── exception/                              Exceções de negócio (mapeadas para status gRPC)
 └── handler/ExceptionHandler.java           Bean GrpcExceptionHandler - tradução de exceções para Status gRPC
 src/main/resources/
-├── application.properties                  Configuração de runtime (PostgreSQL, porta gRPC)
+├── application.properties                  Configuração de runtime (PostgreSQL, porta gRPC, API key)
+├── application-tls.properties              Perfil opcional: habilita TLS (ver Autenticação e TLS)
 └── db/migration/V1__Init.sql               Script Flyway (schema + massa inicial)
+scripts/generate-dev-cert.sh                Gera o certificado autoassinado usado pelo perfil "tls"
 src/test/java/...                           Testes unitários (JUnit 5 + Mockito + AssertJ)
 ```
 
@@ -81,6 +86,7 @@ O fluxo de uma chamada é: `ProductController` (adaptador gRPC) → `IProductSer
 - JDK 21 instalado e configurado (`JAVA_HOME`).
 - Maven 3.6.3+ (o wrapper `./mvnw` já está incluído no repositório e não exige instalação manual do Maven).
 - Docker e Docker Compose, para subir o PostgreSQL local.
+- OpenSSL, apenas se for usar o perfil `tls` (ver [Autenticação e TLS](#autenticação-e-tls)).
 
 ## Como executar
 
@@ -98,11 +104,11 @@ Isso cria um container Postgres na porta `5432`, com o banco `productdb` e usuá
 ./mvnw spring-boot:run
 ```
 
-Na primeira execução, o Hibernate cria/atualiza o schema automaticamente (`spring.jpa.generate-ddl=true`). O servidor gRPC sobe na porta `9090` (`spring.grpc.server.port`).
+Na primeira execução, o Hibernate cria/atualiza o schema automaticamente (`spring.jpa.generate-ddl=true`). O servidor gRPC sobe na porta `9090` (`spring.grpc.server.port`), **exigindo o header `x-api-key`** em toda chamada (ver [Autenticação e TLS](#autenticação-e-tls)).
 
 **3. (Opcional) Teste manualmente com o cliente de exemplo:**
 
-Com a aplicação rodando, execute a classe `br.com.grpc.spring.client.ClientGrpc` (via sua IDE ou `mvn exec:java`). Ela cria dois produtos, consulta por ID, lista todos e depois remove os produtos criados, imprimindo cada resposta no console.
+Com a aplicação rodando, execute a classe `br.com.grpc.spring.client.ClientGrpc` (via sua IDE ou `mvn exec:java`). Ela já envia o header `x-api-key` esperado pelo servidor (usa o mesmo default `local-dev-key-change-me`, ou lê a variável de ambiente `API_KEY` se você tiver customizado). Cria dois produtos, consulta por ID, lista todos (paginado) e depois remove os produtos criados, imprimindo cada resposta no console.
 
 ## Serviço gRPC
 
@@ -110,16 +116,54 @@ Contrato completo em [`src/main/proto/product-service.proto`](src/main/proto/pro
 
 | RPC | Requisição | Resposta | Descrição |
 |---|---|---|---|
-| `Create` | `ProductRequest` | `ProductResponse` | Cria um produto (`name`, `price`, `quantity_in_stock`). Retorna erro `ALREADY_EXISTS` se já existir produto com o mesmo nome. |
-| `FindById` | `RequestById` | `ProductResponse` | Busca um produto pelo `id`. Retorna erro `NOT_FOUND` se não existir. |
-| `FindAll` | `EmptyRequest` | `ProductResponseList` | Lista todos os produtos cadastrados. |
-| `Delete` | `RequestById` | `EmptyResponse` | Remove um produto pelo `id`. Retorna erro `NOT_FOUND` se não existir. |
+| `Create` | `ProductRequest` | `ProductResponse` | Cria um produto (`name`, `price`, `quantity_in_stock`). Retorna erro `ALREADY_EXISTS` se já existir produto com o mesmo nome, ou `INVALID_ARGUMENT` se os campos não passarem na validação (ver abaixo). |
+| `FindById` | `RequestById` | `ProductResponse` | Busca um produto pelo `id`. Retorna erro `NOT_FOUND` se não existir, ou `INVALID_ARGUMENT` se `id` não for positivo. |
+| `FindAll` | `FindAllRequest` | `ProductResponseList` | Lista produtos paginados (`page`, `size`). `size` omitido/≤ 0 usa o padrão (20); acima de 100 é limitado a 100. A resposta inclui `page`, `size`, `total_elements` e `total_pages`. |
+| `Delete` | `RequestById` | `EmptyResponse` | Remove um produto pelo `id`. Retorna erro `NOT_FOUND` se não existir, ou `INVALID_ARGUMENT` se `id` não for positivo. |
 
-Erros de negócio (`ProductAlreadyExistsException`, `ProductNotFoundException`) são traduzidos para o `Status` gRPC correspondente pelo bean `ExceptionHandler` (implementação de `org.springframework.grpc.server.exception.GrpcExceptionHandler`), então o cliente recebe um erro gRPC com o código apropriado (`ALREADY_EXISTS`, `NOT_FOUND`) em vez de um erro genérico.
+Toda chamada passa antes pelo `ApiKeyServerInterceptor` (ver [Autenticação e TLS](#autenticação-e-tls)), que rejeita com `UNAUTHENTICATED` requisições sem o header `x-api-key` correto.
+
+Erros de negócio (`ProductAlreadyExistsException`, `ProductNotFoundException`) e de validação de entrada (`ConstraintViolationException`, via Bean Validation em `ProductInputDTO`/`IProductService`) são traduzidos para o `Status` gRPC correspondente pelo bean `ExceptionHandler` (implementação de `org.springframework.grpc.server.exception.GrpcExceptionHandler`), então o cliente recebe um erro gRPC com o código apropriado (`ALREADY_EXISTS`, `NOT_FOUND`, `INVALID_ARGUMENT`) em vez de um erro genérico.
+
+## Autenticação e TLS
+
+### Autenticação (API key)
+
+Toda chamada gRPC precisa do header (metadata) `x-api-key`, validado pelo `ApiKeyServerInterceptor` (registrado globalmente via `@GlobalServerInterceptor`, aplicado a todos os métodos do serviço). Sem o header, ou com um valor incorreto, a chamada é rejeitada com `Status.UNAUTHENTICATED` antes de chegar em `ProductController`.
+
+A chave esperada vem de `app.security.api-key` em `application.properties`, com default `local-dev-key-change-me` — troque via variável de ambiente `API_KEY` (ver [Variáveis de ambiente](#variáveis-de-ambiente)) fora de um ambiente de estudo local. `ClientGrpc.java` já envia o header automaticamente.
+
+**Sem TLS, esse header trafega em texto plano** — a autenticação por si só não protege a chave em trânsito; combine com o perfil `tls` abaixo antes de expor o serviço fora do `localhost`.
+
+### TLS (opcional, perfil `tls`)
+
+Por padrão a aplicação roda em texto plano (adequado para desenvolvimento local isolado). Para habilitar TLS com um certificado autoassinado:
+
+```bash
+# 1. Gere o certificado de desenvolvimento (uma vez só; fica em certs/, fora do Git)
+./scripts/generate-dev-cert.sh
+
+# 2. Rode a aplicação com o perfil "tls"
+./mvnw spring-boot:run -Dspring-boot.run.profiles=tls
+```
+
+O perfil `tls` (`application-tls.properties`) configura um [SSL Bundle](https://docs.spring.io/spring-boot/reference/features/ssl.html) em formato PEM apontando para `certs/server-cert.pem`/`certs/server-key.pem`, e habilita `spring.grpc.server.ssl.enabled=true`.
+
+Com TLS ativo, clientes em texto plano (`.usePlaintext()`) — incluindo o `ClientGrpc.java` padrão — deixam de funcionar. Para testar com `grpcurl`:
+
+```bash
+grpcurl -cacert certs/server-cert.pem \
+  -import-path ./src/main/proto -proto product-service.proto \
+  -H 'x-api-key: local-dev-key-change-me' \
+  -d '{}' \
+  localhost:9090 br.com.grpc.spring.ProductService/FindAll
+```
+
+> **Este certificado é autoassinado, só para desenvolvimento/teste.** Fora do `localhost` (produção, ambiente compartilhado), use um certificado emitido por uma CA de verdade — a SSL Bundle do Spring Boot aceita qualquer PEM válido no lugar do gerado pelo script.
 
 ## Testando o serviço manualmente
 
-Como o serviço é exposto só via gRPC (não há REST/HTTP), chamadas manuais precisam de um cliente que fale gRPC — não dá pra usar `curl` puro. Com a aplicação rodando (`./mvnw spring-boot:run`, porta `9090`), qualquer uma das opções abaixo funciona; escolha pela conveniência:
+Como o serviço é exposto só via gRPC (não há REST/HTTP), chamadas manuais precisam de um cliente que fale gRPC — não dá pra usar `curl` puro. Com a aplicação rodando (`./mvnw spring-boot:run`, porta `9090`), toda chamada precisa do header `x-api-key` (ver [Autenticação e TLS](#autenticação-e-tls)); os exemplos abaixo já incluem `local-dev-key-change-me`, o default local. Qualquer uma das opções abaixo funciona; escolha pela conveniência:
 
 ### grpcurl (linha de comando, sem GUI)
 
@@ -133,24 +177,28 @@ O projeto não expõe *server reflection* por padrão (ver [Próximos passos](#p
 # Create
 grpcurl -plaintext \
   -import-path ./src/main/proto -proto product-service.proto \
+  -H 'x-api-key: local-dev-key-change-me' \
   -d '{"name": "COMPUTADOR", "price": 2540.99, "quantityInStock": 400}' \
   localhost:9090 br.com.grpc.spring.ProductService/Create
 
 # FindById
 grpcurl -plaintext \
   -import-path ./src/main/proto -proto product-service.proto \
+  -H 'x-api-key: local-dev-key-change-me' \
   -d '{"id": "1"}' \
   localhost:9090 br.com.grpc.spring.ProductService/FindById
 
-# FindAll
+# FindAll (paginado — page/size opcionais, default size=20)
 grpcurl -plaintext \
   -import-path ./src/main/proto -proto product-service.proto \
-  -d '{}' \
+  -H 'x-api-key: local-dev-key-change-me' \
+  -d '{"page": 0, "size": 10}' \
   localhost:9090 br.com.grpc.spring.ProductService/FindAll
 
 # Delete
 grpcurl -plaintext \
   -import-path ./src/main/proto -proto product-service.proto \
+  -H 'x-api-key: local-dev-key-change-me' \
   -d '{"id": "1"}' \
   localhost:9090 br.com.grpc.spring.ProductService/Delete
 ```
@@ -161,22 +209,26 @@ Para listar os métodos disponíveis a partir do `.proto` (sem depender de refle
 grpcurl -plaintext -import-path ./src/main/proto -proto product-service.proto localhost:9090 list
 ```
 
+Testando com o perfil `tls` ativo, ver [Autenticação e TLS](#autenticação-e-tls) — troque `-plaintext` por `-cacert certs/server-cert.pem`.
+
 ### grpcui (interface web local)
 
 ```bash
 brew install grpcui
-grpcui -plaintext -import-path ./src/main/proto -proto product-service.proto localhost:9090
+grpcui -plaintext -import-path ./src/main/proto -proto product-service.proto \
+  -rpc-header 'x-api-key: local-dev-key-change-me' \
+  localhost:9090
 ```
 
 Abre uma UI no navegador — parecida com o Postman, mas específica pra gRPC — já com os métodos e mensagens de exemplo montados a partir do `.proto`.
 
 ### Postman
 
-Há uma collection pronta em [`postman/grpc-spring.postman_collection.json`](postman/grpc-spring.postman_collection.json), com os 4 métodos (`Create`, `FindById`, `FindAll`, `Delete`) já apontando para `localhost:9090`. Depois de importar, abra a aba **Service definition** de cada request e importe `src/main/proto/product-service.proto` — o Postman precisa da definição do proto pra montar/validar as mensagens (o suporte a gRPC do Postman não é totalmente coberto pelo formato de exportação de collection, então esse passo manual às vezes é necessário mesmo com a collection já importada).
+Há uma collection pronta em [`postman/grpc-spring.postman_collection.json`](postman/grpc-spring.postman_collection.json), com os 4 métodos (`Create`, `FindById`, `FindAll`, `Delete`) já apontando para `localhost:9090` e com o header `x-api-key` pré-preenchido. Depois de importar, abra a aba **Service definition** de cada request e importe `src/main/proto/product-service.proto` — o Postman precisa da definição do proto pra montar/validar as mensagens (o suporte a gRPC do Postman não é totalmente coberto pelo formato de exportação de collection, então esse passo manual às vezes é necessário mesmo com a collection já importada).
 
 ### Cliente de exemplo (`ClientGrpc`)
 
-Opção que não exige instalar nenhuma ferramenta nova: com a aplicação rodando, execute a classe `br.com.grpc.spring.client.ClientGrpc` (via IDE ou `mvn exec:java`) — ver [Como executar](#como-executar), passo 3. Ela já exercita os 4 métodos em sequência (cria dois produtos, busca por ID, lista todos, remove) e imprime cada resposta no console.
+Opção que não exige instalar nenhuma ferramenta nova: com a aplicação rodando, execute a classe `br.com.grpc.spring.client.ClientGrpc` (via IDE ou `mvn exec:java`) — ver [Como executar](#como-executar), passo 3. Ela já envia o header `x-api-key` e exercita os 4 métodos em sequência (cria dois produtos, busca por ID, lista todos, remove) e imprime cada resposta no console.
 
 ## Testes
 
@@ -190,15 +242,39 @@ Se no futuro forem adicionados testes de integração que exercitem o serviço v
 
 ## Configuração
 
-As configurações de runtime ficam em `src/main/resources/application.properties` (perfil padrão, usado com PostgreSQL) e `application-test.properties` (perfil de testes, usado com H2). Principais propriedades:
+As configurações de runtime ficam em `src/main/resources/application.properties` (perfil padrão, usado com PostgreSQL), `application-tls.properties` (perfil opcional, ver [Autenticação e TLS](#autenticação-e-tls)) e `application-test.properties` (perfil de testes, usado com H2). Principais propriedades:
 
 | Propriedade | Descrição |
 |---|---|
 | `spring.datasource.url` | URL de conexão com o banco (Postgres em runtime, H2 em testes). |
 | `spring.jpa.generate-ddl` / `hibernate.hbm2ddl.auto` | Geração automática de schema pelo Hibernate. |
 | `spring.grpc.server.port` | Porta do servidor gRPC (`9090` por padrão neste projeto). |
+| `app.security.api-key` | Chave exigida no header `x-api-key` de toda chamada gRPC (ver [Autenticação e TLS](#autenticação-e-tls)). |
+| `spring.grpc.server.ssl.*` | Configuração de TLS do servidor gRPC (perfil `tls`). |
+
+### Variáveis de ambiente
+
+As credenciais e a conexão do Postgres (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) e a chave de API (`API_KEY`) são lidas de variáveis de ambiente, tanto em `application.properties` quanto em `docker-compose.yml`, com defaults de desenvolvimento local — então `./mvnw spring-boot:run` e `docker-compose up -d` funcionam sem nenhuma configuração extra.
+
+Este projeto **não usa arquivo `.env`**: valores reais (fora do ambiente de estudo local) são esperados como variáveis de ambiente reais do processo, injetadas por quem estiver rodando a aplicação — um cofre de segredos (Vault, AWS Secrets Manager, um secret do Kubernetes, etc.) ou, localmente, `export DB_PASSWORD=... && ./mvnw spring-boot:run`. `${DB_USER:admin}` e os demais placeholders em `application.properties` funcionam com qualquer uma dessas origens, sem precisar de nenhuma configuração adicional no código — é só garantir que a variável exista no ambiente do processo.
 
 ## Histórico de atualizações
+
+### Revisão 5 — removido o suporte a `.env` local
+
+- Avaliou-se ligar `application.properties` a um arquivo `.env` local (via `spring.config.import`), mas a decisão final foi não usar `.env`/`.env.example` neste projeto: segredos reais vão para um cofre de segredos (Vault) em vez de um arquivo local. `.env.example` foi removido; `application.properties` e `docker-compose.yml` continuam lendo `${DB_USER:admin}` e afins normalmente — funcionam com qualquer variável de ambiente real presente no processo, seja exportada manualmente, seja injetada pelo Vault (ou equivalente) em produção. Nenhuma mudança de código necessária para isso: o mecanismo `${VAR:default}` já era agnóstico à origem da variável.
+
+### Revisão 4 — auditoria de segurança independente e correção de build
+
+- **Auditoria de segurança do zero:** reavaliação completa do projeto (código, configuração, histórico do Git e CVEs das dependências fixadas), sem se apoiar nas rodadas anteriores, para conferir se algo tinha passado despercebido. Nenhuma vulnerabilidade nova encontrada. Checagens novas desta rodada: o driver JDBC do Postgres resolve para `42.7.13` via o BOM do `spring-boot-starter-parent:4.1.1`, já corrigindo a CVE-2026-54291 (downgrade de channel binding SCRAM); `grpc-netty` `1.83.1` não é afetado pela CVE-2025-55163 ("MadeYouReset" HTTP/2 DoS); e a CVE crítica do Spring Boot deste ano (CVE-2026-40976, bypass de segurança com Actuator) não se aplica — nem a versão (afeta só `4.0.0`–`4.0.5`) nem a dependência (`spring-boot-starter-actuator` não está no `pom.xml`) batem com este projeto.
+- **Correção de build:** ao rodar `./mvnw` de verdade pela primeira vez desde a Revisão 3, `ClientGrpc.java` não compilava — `MetadataUtils.attachHeaders(stub, metadata)`, usado para anexar o header `x-api-key` no cliente de exemplo, é um método de conveniência que não existe mais no `grpc-java 1.83.1` (removido em alguma versão entre a época em que esse padrão era comum e a atual). Corrigido para usar `MetadataUtils.newAttachHeadersInterceptor(headers)` aplicado via `.withInterceptors(...)`, que é a API atual. Nenhum outro ponto do projeto usava `MetadataUtils`.
+
+### Revisão 3 — autenticação, TLS e paginação
+
+- **Autenticação:** adicionado `ApiKeyServerInterceptor` (`@GlobalServerInterceptor`), exigindo o header `x-api-key` em toda chamada gRPC. Chave configurável via `app.security.api-key` / variável de ambiente `API_KEY`. `ClientGrpc.java` atualizado para enviar o header automaticamente.
+- **TLS:** adicionado perfil opcional `tls` (`application-tls.properties`), usando um [SSL Bundle](https://docs.spring.io/spring-boot/reference/features/ssl.html) PEM. Criado `scripts/generate-dev-cert.sh` para gerar um certificado autoassinado de desenvolvimento (não commitado — `certs/` está no `.gitignore`). Não é o perfil padrão, para não quebrar o fluxo local de `./mvnw spring-boot:run`.
+- **Paginação:** `FindAll` passou a receber `FindAllRequest{page, size}` (antes `EmptyRequest`) e `ProductResponseList` ganhou `page`, `size`, `total_elements`, `total_pages`. Tamanho padrão de página: 20; máximo: 100 (protege contra um cliente pedir a tabela inteira de uma vez).
+- `ClientGrpc.java`, os comandos `grpcurl`/`grpcui` (ver [Testando o serviço manualmente](#testando-o-serviço-manualmente)) e a collection do Postman foram todos atualizados para o novo contrato (header de API key + `FindAllRequest`).
 
 ### Revisão 2 — migração para Spring Boot 4.1 e gRPC nativo
 
@@ -224,13 +300,20 @@ As configurações de runtime ficam em `src/main/resources/application.propertie
 ## Próximos passos recomendados
 
 - **Java 25 (LTS):** não foi aplicado nesta revisão porque não é possível confirmar, a partir daqui, que o JDK 25 está instalado na sua máquina — mudar `java.version` no `pom.xml` sem isso quebraria o build local. Java 21 continua sendo uma LTS válida e suportada pelo Spring Boot 4.1. Para migrar: instale o JDK 25, ajuste `<java.version>25</java.version>` no `pom.xml` e rode `./mvnw clean verify` para validar.
-- **Validar a migração localmente:** não foi possível compilar o projeto neste ambiente (o sandbox usado para esta revisão não tem acesso ao Maven Central), então as versões e a API do Spring gRPC foram validadas por análise cruzada da documentação oficial e dos POMs publicados, não por build real. Rode `./mvnw clean verify` (com o Postgres via `docker-compose up -d`, se for validar também a subida da aplicação) antes de dar commit.
+- **Validar a migração localmente:** o ambiente usado nas Revisões 1–3 não tinha acesso ao Maven Central, então boa parte das mudanças foi validada só por análise estática/cruzada, não por build real — e isso realmente deixou passar um erro de compilação (ver Revisão 4). Depois da correção, rode `./mvnw clean verify` (com o Postgres via `docker-compose up -d`, se for validar também a subida da aplicação) antes de dar commit, para confirmar que não sobrou mais nada.
 - Considerar habilitar `spring.grpc.server.reflection.enabled=true` (Server Reflection) para facilitar testes manuais com `grpcurl`/`grpcui`, já que agora é uma propriedade nativa de configuração.
+- **Autenticação:** o `ApiKeyServerInterceptor` é uma solução simples (chave única compartilhada) — para múltiplos consumidores/produção, considerar evoluir para o suporte nativo do Spring gRPC a Spring Security (`GrpcSecurity`, `@PreAuthorize`), que permite tokens por cliente, escopos, etc.
+- **TLS em produção:** o certificado gerado por `scripts/generate-dev-cert.sh` é autoassinado e só serve para desenvolvimento local. Fora do `localhost`, aponte o SSL Bundle (`application-tls.properties`) para um certificado emitido por uma CA de verdade.
 
 ## Observações conhecidas
 
 - O `flyway-core` está declarado apenas com `scope=test`, mas existe um script de migração em `src/main/resources/db/migration/V1__Init.sql`. Isso significa que, em runtime (perfil padrão com Postgres), o Flyway **não** está no classpath e esse script não é executado — o schema é criado apenas pelo `hibernate.hbm2ddl.auto=update`. Se o uso do Flyway for intencional para produção, mova a dependência para o escopo padrão (compile/runtime) e avalie desativar `spring.jpa.generate-ddl`/`hbm2ddl.auto=update`, já que as duas estratégias de schema juntas tendem a divergir com o tempo.
 - Os campos de dependência (`@Autowired` em campo) em `ProductController` e `ProductServiceImpl` funcionam, mas injeção via construtor é a prática atualmente recomendada pelo Spring (facilita testes e deixa dependências obrigatórias explícitas).
+- TLS (perfil `tls`) é opcional e não vem ativado por padrão — ver [Autenticação e TLS](#autenticação-e-tls) e [Próximos passos](#próximos-passos-recomendados) sobre por que isso é intencional (um certificado autoassinado não deveria ser o default "seguro" de ninguém).
+
+## Segurança
+
+Foi feita uma análise de segurança do projeto (autenticação, TLS, credenciais, validação de entrada, paginação, imagem Docker, scanner de dependências) — achados e correções estão registrados nas entradas de [Histórico de atualizações](#histórico-de-atualizações), principalmente nas Revisões 3 e 4.
 
 ## Licença
 
